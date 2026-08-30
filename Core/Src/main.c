@@ -42,6 +42,8 @@
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
 
+TIM_HandleTypeDef htim3;
+
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
@@ -53,6 +55,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_I2C1_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -68,6 +71,43 @@ int __io_putchar(int ch) {
     HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 100);
     return ch;
 }
+
+float angle_x = 0.0f, angle_y = 0.0f;
+uint32_t last_tick = 0;
+
+void set_servo(uint32_t channel, float angle) {
+    uint32_t pulse = (uint32_t)(500.0f + angle * 2000.0f / 180.0f);
+    __HAL_TIM_SET_COMPARE(&htim3, channel, pulse);
+}
+
+
+typedef struct {
+    float kp, ki, kd;
+    float integral;
+    float prev_error;
+    float out_min, out_max;
+} PID_t;
+
+float PID_Update(PID_t *pid, float target, float current, float dt) {
+    float error = target - current;
+
+    pid->integral += error * dt;
+    if (pid->integral >  20.0f) pid->integral =  20.0f;
+    if (pid->integral < -20.0f) pid->integral = -20.0f;
+
+    float derivative = (error - pid->prev_error) / dt;
+    pid->prev_error = error;
+
+    float output = pid->kp * error
+                 + pid->ki * pid->integral
+                 + pid->kd * derivative;
+
+    if (output >  pid->out_max) output =  pid->out_max;
+    if (output <  pid->out_min) output =  pid->out_min;
+    return output;
+}
+
+
 /* USER CODE END 0 */
 
 /**
@@ -101,8 +141,26 @@ int main(void)
   MX_GPIO_Init();
   MX_USART1_UART_Init();
   MX_I2C1_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   MPU6050_Init();
+
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+
+  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 1500);
+
+
+  PID_t pid_x = {0.5f, 0.0f, 0.0f, 0, 0, -45.0f, 45.0f};
+  PID_t pid_y = {0.5f, 0.0f, 0.0f, 0, 0, -45.0f, 45.0f};
+
+
+  HAL_Delay(500);
+  int16_t ax0, ay0, az0, gx0, gy0, gz0;
+  MPU6050_Read(&ax0, &ay0, &az0, &gx0, &gy0, &gz0);
+  float ax0_g = ax0 / 16384.0f, ay0_g = ay0 / 16384.0f, az0_g = az0 / 16384.0f;
+  float y_offset = atan2f(-ax0_g, az0_g) * 57.2958f;
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -113,23 +171,44 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
+
 	  int16_t ax, ay, az, gx, gy, gz;
 	  MPU6050_Read(&ax, &ay, &az, &gx, &gy, &gz);
 
-	  float ax_g = ax / 16384.0f;
-	  float ay_g = ay / 16384.0f;
-	  float az_g = az / 16384.0f;
+	  float ax_g   = ax / 16384.0f;
+	  float ay_g   = ay / 16384.0f;
+	  float az_g   = az / 16384.0f;
 	  float gx_dps = gx / 131.0f;
 	  float gy_dps = gy / 131.0f;
-	  float gz_dps = gz / 131.0f;
 
+	  uint32_t now = HAL_GetTick();
+	  float dt = (now - last_tick) / 1000.0f;
+	  if (dt <= 0.0f || dt > 0.2f) dt = 0.01f;
+	  last_tick = now;
 
 	  float accel_x = atan2f(ay_g, az_g) * 57.2958f;
+	  angle_x = 0.98f * (angle_x + gx_dps * dt) + 0.02f * accel_x;
+
+
 	  float accel_y = atan2f(-ax_g, az_g) * 57.2958f;
+	  angle_y = 0.98f * (angle_y + gy_dps * dt) + 0.02f * accel_y;
 
-	  printf("Angle X: %.1f  Y: %.1f\r\n", accel_x, accel_y);
 
-	  HAL_Delay(100);
+
+	  float correction = PID_Update(&pid_x, 0.0f, angle_x, dt);
+	  if (correction > -0.5f && correction < 0.5f) correction = 0;
+	  set_servo(TIM_CHANNEL_1, 90.0f - correction * 2.5f);
+
+	  float correction_y = PID_Update(&pid_y, 0.0f, angle_y, dt);
+	  if (correction_y > -0.5f && correction_y < 0.5f) correction_y = 0;
+	  set_servo(TIM_CHANNEL_2, 90.0f + correction_y * 2.3f);
+
+
+	  printf("X: %.1f/%.1f  Y: %.1f/%.1f\r\n", angle_x, correction, angle_y, correction_y);
+	  HAL_Delay(10);
+
+
+
 
   }
   /* USER CODE END 3 */
@@ -212,6 +291,69 @@ static void MX_I2C1_Init(void)
   /* USER CODE BEGIN I2C1_Init 2 */
 
   /* USER CODE END I2C1_Init 2 */
+
+}
+
+/**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 83;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 19999;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+  HAL_TIM_MspPostInit(&htim3);
 
 }
 
