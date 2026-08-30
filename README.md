@@ -23,9 +23,10 @@ rigidly attached), both X and Y axes correctly estimate tilt angle
 and drive the corresponding servo in the right direction to 
 compensate. Demonstrated in the video below.
 
--x-axis:
+x-axis:
 https://drive.google.com/file/d/1HsSbvuQHlDuv8ZtWv_lvnNa-CsRnEFdB/view?usp=sharing
--y-axis:
+
+y-axis:
 https://drive.google.com/file/d/1jk1Q20R54CHwHIKCQWLDTwcZgavYpe7B/view?usp=sharing
 
 **Sensor mounted directly on servo body: not yet stable.** When 
