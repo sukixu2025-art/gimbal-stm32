@@ -17,29 +17,31 @@ Built from scratch without any flight controller libraries.
 - PWM servo control via TIM3 (50Hz, 1000-2000us pulse range)
 
 ## Current Status
-**X-axis: working.** Closed-loop stabilization demonstrated — 
-tilting the sensor produces a correctly-directed servo correction 
-that returns the platform toward level. Stable to within ±0.1° 
-at rest.
+**Both axes: working (sensor isolated from servo).** When the 
+MPU-6050 is held/mounted separately from the servo body (not 
+rigidly attached), both X and Y axes correctly estimate tilt angle 
+and drive the corresponding servo in the right direction to 
+compensate. Demonstrated in the video below.
 
-**Y-axis: implemented, not fully stable.** Angle estimation and PID 
-computation are correct (verified via serial output), but closing 
-the loop on the servo currently causes oscillation — traced to 
-mechanical vibration coupling between the servo and IMU when 
-mounted together (see Known Limitations).
+x-axis
+https://drive.google.com/file/d/1HsSbvuQHlDuv8ZtWv_lvnNa-CsRnEFdB/view?usp=sharing
+y-axis
+https://drive.google.com/file/d/1jk1Q20R54CHwHIKCQWLDTwcZgavYpe7B/view?usp=sharing
+
+**Sensor mounted directly on servo body: not yet stable.** When 
+MPU-6050 is rigidly attached to the servo body itself, servo motion 
+introduces vibration into the accelerometer reading, causing the 
+control loop to oscillate — see Known Limitations.
+
+
 
 ## Known Limitations
 - Mounting MPU-6050 directly on a servo body introduces vibration 
-  into the accelerometer reading, causing the control loop to react 
-  to its own corrections. Confirmed by testing with the sensor 
-  mechanically isolated from the servo, where tracking is smooth. 
-  This is a known challenge in gimbal design.
-- Y-axis PID gains have not yet converged on a stable configuration.
+  into the accelerometer reading, causing oscillation. Both axes 
+  work correctly when the sensor is mechanically isolated from the 
+  servo (see demo) — this is the current testing configuration. 
+  Fully integrating sensor and servo onto a single rigid stabilized 
+  platform requires vibration isolation between them.
 - A CH340 USB-serial debug adapter failed during testing (hardware 
   fault, unrelated to the STM32/sensor/servo circuit).
 
-## Next Steps
-- Vibration-isolate the IMU mount (foam standoff)
-- Low-pass filter on raw accelerometer data before angle estimation
-- Re-tune Y-axis PID gains
-- Real-time PID tuning over serial (no reflash required)
